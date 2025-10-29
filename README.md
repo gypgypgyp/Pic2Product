@@ -3,26 +3,42 @@
 ## architecture
 
 Shopper (Web/Mobile)
+
         │ uploads image
-        ▼
+
 Frontend UI
+
         │ POST /recommend
-        ▼
+
 Backend API (FastAPI)
+
         │ 1) YOLOv8 detect objects
+
         │ 2) Crop product regions
+
         │ 3) CLIP embeddings
+
         │ 4) Vector search (catalog_embeddings.npy)
-        ▼
+
+
 Retrieve Top-K sku_id
+
         │
-        ▼
+
+
 POST /catalog/query
+
         │ returns title, brand, price, image_url
-        ▼
+
+
 Frontend Renders:
+
 - bounding boxes on image
+
 - product cards with links
+
+
+Shopper → Frontend → Backend → YOLO → Embedding → Vector Search → Lookup → UI
 
 
 ## Data flow
