@@ -1,3 +1,9 @@
+# Ignore product images
+static/catalog/images/
+
+# Model embeddings & temp files
+embeddings/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
