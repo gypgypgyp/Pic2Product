@@ -2,51 +2,28 @@
 
 ## architecture
 
-┌─────────────────────┐         ┌──────────────────────┐
-│      Shopper        │         │      Frontend UI      │
-│ (Web / Mobile App)  │         │  React / Vue / HTML   │
-└─────────┬───────────┘         └─────────┬────────────┘
-          │ Upload image (File/URL)        │
-          │ POST /recommend                │
-          ▼                                 │
-┌──────────────────────────────────────────────────────┐
-│                     Backend API                      │
-│                    (FastAPI Server)                  │
-└─────────┬────────────────────────────────────────────┘
-          │
-          │ 1) Object Detection (YOLOv8)
-          │    → find objects & bboxes
-          │
-          │ 2) Instance Crop → get each product patch
-          │
-          │ 3) Embedding (OpenCLIP)
-          │    → convert image → feature vector
-          │
-          │ 4) Vector Retrieval
-          │    → compare with catalog embeddings
-          │    → return Top-K sku_id per object
-          │
-          ▼
-┌────────────────────────────┐
-│  catalog/query API         │
-│  (lookup sku metadata)     │
-└─────────┬──────────────────┘
-          │ returns title, brand, price, image_url
-          ▼
-┌──────────────────────┐
-│   JSON Response       │
-│ { items: [...], bboxes, scores } │
-└─────────┬────────────┘
-          │
-     Frontend formats UI:
-          │
-          ▼
-┌───────────────────────────────────────┐
-│  User Sees Final Result               │
-│  - Bounding box labels on photo       │
-│  - Product card list below            │
-│  - Click → Go to Product Page         │
-└───────────────────────────────────────┘
+Shopper (Web/Mobile)
+        │ uploads image
+        ▼
+Frontend UI
+        │ POST /recommend
+        ▼
+Backend API (FastAPI)
+        │ 1) YOLOv8 detect objects
+        │ 2) Crop product regions
+        │ 3) CLIP embeddings
+        │ 4) Vector search (catalog_embeddings.npy)
+        ▼
+Retrieve Top-K sku_id
+        │
+        ▼
+POST /catalog/query
+        │ returns title, brand, price, image_url
+        ▼
+Frontend Renders:
+- bounding boxes on image
+- product cards with links
+
 
 ## Data flow
 YOLOv8 → crop → CLIP embedding → cosine top-K → 得到 sku_id 列表 → POST /catalog/query → 返回详情 → 前端展示
