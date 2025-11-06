@@ -21,7 +21,7 @@ from mvp_reco import (
 # ---------------------------
 # Config (env-overridable)
 # ---------------------------
-CATALOG_CSV = Path(os.getenv("CATALOG_CSV", "catalog.csv"))
+CATALOG_CSV = Path(os.getenv("CATALOG_CSV", "catalog/catalog.csv"))
 EMB_DIR = Path(os.getenv("EMBEDDINGS_DIR", "embeddings"))
 RUNS_DIR = Path(os.getenv("RUNS_DIR", "runs"))
 STATIC_DIR = Path(os.getenv("STATIC_DIR", "catalog"))
