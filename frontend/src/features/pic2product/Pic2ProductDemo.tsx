@@ -1,9 +1,17 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+  callRecommend,
+  catalogQuery,
+  type DetectInstance,
+  type ProductItem,
+} from "./api";
 
 export default function Pic2ProductDemo() {
   // UI state
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [uploadedUrl, setUploadedUrl] = useState<string | null>(null);
+  const [visUrl, setVisUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -14,33 +22,12 @@ export default function Pic2ProductDemo() {
   // 参数（仅前端使用，不改变后端 API）
   const [topK, setTopK] = useState<number>(5); // 只用于前端展示截断
   const [scoreThreshold, setScoreThreshold] = useState<number>(0.0); // 只用于前端过滤
+  const alphaImg = 0.7; // 与后端默认一致
 
   // image measure
   const imgRef = useRef<HTMLImageElement | null>(null);
   const [imgNatural, setImgNatural] = useState<{ w: number; h: number }>({ w: 1, h: 1 });
   const [imgDisplay, setImgDisplay] = useState<{ w: number; h: number }>({ w: 1, h: 1 });
-
-  // ========= Types =========
-  type TopKItem = { sku_id: string; score: number; title?: string; brand?: string; link?: string };
-  type DetectInstance = {
-    bbox: [number, number, number, number]; // [x1,y1,x2,y2] 基于原图像素
-    class: string;
-    top_k: TopKItem[];
-  };
-  type RecommendResponse = {
-    instances: DetectInstance[];
-  };
-  type ProductItem = {
-    sku_id: string;
-    title: string;
-    brand?: string;
-    price?: number;
-    image_url?: string;
-  };
-  type CatalogQueryResponse = {
-    items: ProductItem[];
-    missing?: string[];
-  };
 
   // ========= Effects =========
   useEffect(() => {
@@ -71,7 +58,7 @@ export default function Pic2ProductDemo() {
     if (!f) return;
     // 简单限制：图片 ≤ 5MB
     if (f.size > 5 * 1024 * 1024) {
-      setError("图片太大了，建议≤5MB");
+      setError("The image is too large, suggest ≤5MB.");
       return;
     }
     setFile(f);
@@ -79,7 +66,7 @@ export default function Pic2ProductDemo() {
 
   const handleRecommend = async () => {
     if (!file) {
-      setError("请先选择一张图片");
+      setError("Please select an image first");
       return;
     }
 
@@ -87,20 +74,21 @@ export default function Pic2ProductDemo() {
     setError(null);
     setInstances([]);
     setSkuMap({});
+    setUploadedUrl(null);
+    setVisUrl(null);
 
     try {
-      const form = new FormData();
-      form.append("image", file); // 按照API契约：multipart/form-data { image }
-
-      const res = await fetch("/recommend", { method: "POST", body: form });
-      if (!res.ok) throw new Error(`Request failed: ${res.status}`);
-
-      const data: RecommendResponse = await res.json();
+      const data = await callRecommend({
+        image: file,
+        topk: topK,
+        alphaImg,
+        returnVis: true,
+      });
 
       // 安全兜底
       if (!data.instances || data.instances.length === 0) {
         setInstances([]);
-        setError("没有检测到商品");
+        setError("No products detected");
         setLoading(false);
         return;
       }
@@ -110,6 +98,8 @@ export default function Pic2ProductDemo() {
         ...ins,
         top_k: ins.top_k.filter((t) => t.score >= scoreThreshold).slice(0, topK),
       }));
+      setUploadedUrl(data.image_url ?? null);
+      setVisUrl(data.vis_url ?? null);
 
       setInstances(filtered);
 
@@ -117,20 +107,14 @@ export default function Pic2ProductDemo() {
       const skuSet = new Set<string>();
       filtered.forEach((ins) => ins.top_k?.forEach((t) => skuSet.add(t.sku_id)));
       if (skuSet.size > 0) {
-        const queryRes = await fetch("/catalog/query", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sku_ids: Array.from(skuSet) }), // 严格按 API契约：Content-Type: application/json
-        });
-        if (!queryRes.ok) throw new Error(`查询商品信息失败：${queryRes.status}`);
-        const q: CatalogQueryResponse = await queryRes.json();
+        const q = await catalogQuery(Array.from(skuSet));
         const map: Record<string, ProductItem> = {};
         q.items?.forEach((it) => (map[it.sku_id] = it));
         setSkuMap(map);
         // q.missing 如有需要可用于 UI 提示
       }
     } catch (err: any) {
-      setError(err?.message || "发生未知错误");
+      setError(err?.message || "An unknown error occurred");
     } finally {
       setLoading(false);
     }
@@ -209,6 +193,21 @@ export default function Pic2ProductDemo() {
                   选择一张图片预览
                 </div>
               )}
+
+              {(uploadedUrl || visUrl) && (
+                <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-blue-600">
+                  {uploadedUrl && (
+                    <a href={uploadedUrl} target="_blank" rel="noreferrer" className="hover:underline">
+                      View uploaded image
+                    </a>
+                  )}
+                  {visUrl && (
+                    <a href={visUrl} target="_blank" rel="noreferrer" className="hover:underline">
+                      View annotated image
+                    </a>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </section>
@@ -237,7 +236,7 @@ export default function Pic2ProductDemo() {
                       const title = prod?.title || t.title || t.sku_id;
                       const brand = prod?.brand || t.brand || "";
                       const price = prod?.price;
-                      const imageUrl = prod?.image_url; // /recommend 没有图片与价格，按规范从 /catalog/query 获取
+                      const imageUrl = prod?.image_url || t.image_url; // 后端返回的 image_url 作为兜底
 
                       return (
                         <article key={t.sku_id + j} className="border rounded-xl overflow-hidden hover:shadow">
