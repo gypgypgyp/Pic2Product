@@ -1,206 +1,175 @@
 # Pic2Product
 
-## architecture
+Pic2Product 是一个以 FastAPI + YOLOv8 + CLIP 为核心的以图搜商品 Demo：用户上传图片 → 后端检测商品 → 根据图像/文本向量在本地商品库中检索最相似的 SKU → 前端展示检测框与推荐卡片。
 
-Shopper (Web/Mobile)
+## 架构概览
 
-        │ uploads image
-
-Frontend UI
-
-        │ POST /recommend
-
-Backend API (FastAPI)
-
-        │ 1) YOLOv8 detect objects
-
-        │ 2) Crop product regions
-
-        │ 3) CLIP embeddings
-
-        │ 4) Vector search (catalog_embeddings.npy)
-
-
-Retrieve Top-K sku_id
-
-        │
-
-
-POST /catalog/query
-
-        │ returns title, brand, price, image_url
-
-
-Frontend Renders:
-
-- bounding boxes on image
-
-- product cards with links
-
-
-Shopper → Frontend → Backend → YOLO → Embedding → Vector Search → Lookup → UI
-
-
-## Data flow
-YOLOv8 → crop → CLIP embedding → cosine top-K → 得到 sku_id 列表 → POST /catalog/query → 返回详情 → 前端展示
-
-
-## Data Schema
-local storage: pictures, embeddings. 图片访问快 & 训练/embedding 重建更方便;Retrieval 阶段直接 load .npy → 无数据库延迟
-MongoDB: catelog (metadata)
-
-商品图像
-本地: /static/catalog/images/<sku_id>.jpg
-
-向量 embeddings
-本地: embeddings/catalog_embeddings.npy 和 catalog_index.json
-
-catalog_embeddings.npy
-存放所有商品的向量（和catalog_index.json中一一对应）：
-```bash
-索引号（index） → 向量值
-0 → [0.12, -0.88, 0.56, ...]
-1 → [0.02, -0.44, 0.91, ...]
-2 → [-0.31,  0.67, 0.12, ...]
-...
+```
+Shopper ─→ React 前端 (Vite) ─→ FastAPI (/recommend, /catalog/*)
+                                          │
+                                          │ YOLOv8 检测 + CLIP 编码
+                                          ↓
+                              本地 catalog.csv + embeddings/*.npz
 ```
 
-catalog_index.json
+- 图片与可视化结果存放在 `runs/`。
+- 商品主图位于 `catalog/images/`，商品元数据在 `catalog/catalog.csv`。
+- 已缓存的图像/文本向量位于 `embeddings/catalog_embeddings.npz` 与 `embeddings/catalog_index.json`。
+
+## 仓库结构
+
+| 目录 / 文件 | 说明 |
+| --- | --- |
+| `api.py` | FastAPI 入口，封装 /recommend、/catalog/rebuild、/catalog/query。 |
+| `mvp_reco.py` | YOLO + CLIP 推理与可视化逻辑，被 API 重用。 |
+| `catalog/` | 商品 CSV + 主图。CSV 至少包含 `sku_id,title,brand,image_path`。 |
+| `embeddings/` | 构建完成后的向量缓存（可删，重启时会重新写入）。 |
+| `runs/` | 上传的用户图片、推理可视化图。 |
+| `frontend/` | React + Vite 前端（`npm run dev` → http://localhost:5173）。 |
+| `requirements.txt` | 模型与数据处理依赖。FastAPI 依赖见下文。 |
+
+## 环境要求
+
+- Python 3.10+（建议 3.11）
+- Node.js 18+（建议 20 LTS）
+- 至少 8GB RAM；GPU 可选（自动检测 CUDA）
+
+## 后端（FastAPI）
+
+### 1. 创建虚拟环境并安装依赖
+
 ```bash
-{
-  "embedding_dim": 512,
-  "ids": [
-    "SKU001",
-    "SKU002",
-    "SKU003"
-  ]
-}
+cd Pic2Product
+python -m venv .venv
+source .venv/bin/activate  # Windows 使用 .venv\Scripts\activate
+
+python -m pip install -U pip setuptools wheel
+pip install -r requirements.txt
+pip install "fastapi>=0.110" "uvicorn[standard]>=0.30" python-multipart pydantic>=2
 ```
 
+> 如需 GPU，可根据平台单独安装匹配版本的 `torch`/`torchvision`。
 
-商品元数据（title/brand/price等）
-MongoDB products 集合
+### 2. 准备商品库与权重
+
+1. `catalog/catalog.csv`：提供 SKU 元数据与图像路径（相对于 catalog 目录）。
+2. `catalog/images/<sku_id>.jpg`：与 CSV 中的 `image_path` 对应。
+3. `yolov8n.pt`：仓库已自带，也可以替换为更大模型。
+
+### 3. 启动 API
+
 ```bash
-MongoDB Schema（products collection）
-{
-  "_id": "SKU001",                // 直接用 sku_id 当主键，省索引
-  "sku_id": "SKU001",             // 冗余一份，方便查询
-  "title": "White low-top leather sneakers",
-  "brand": "Nike",
-  "category": "Shoes",
-  "price": 129.00,
-  "image_path": "static/catalog/images/SKU001.jpg",  // 本地路径
-  "attributes": {                 // 可选字段，方便今后增强匹配能力
-    "color": "white",
-    "material": "leather",
-    "gender": "unisex"
-  },
-  "updated_at": "2025-03-02T10:21:00Z"
-}
+uvicorn api:app --host 0.0.0.0 --port 8000 --reload
+# 或
+python api.py
 ```
 
+常用环境变量（可在 `.env` 或 shell 中设置）：
 
-## APIs
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `CATALOG_CSV` | `catalog/catalog.csv` | CSV 路径 |
+| `EMBEDDINGS_DIR` | `embeddings` | 缓存 npz/json 的目录 |
+| `RUNS_DIR` | `runs` | 上传图像与可视化 |
+| `STATIC_DIR` | `catalog` | FastAPI 挂载为 `/static` 的根目录 |
+| `TOPK` | `3` | /recommend 默认返回的 SKU 数 |
 
-POST /recommend
-Purpose：给一张图片 → 返回检测到的商品的boundingbox + 每个部位对应推荐的 SKU 列表，包括score(cosine similarity)等数据。
-前端可以结合bbox框出原图中出现了哪些商品，并罗列相关商品的sku等信息
-Request Body: multipart/form-data { image }
-Response
+首次运行或 CSV 发生变化时，需要构建向量缓存：
+
 ```bash
+curl -X POST http://localhost:8000/catalog/rebuild \
+     -H "Content-Type: application/json" \
+     -d '{"force": true}'
+```
+
+API 启动后可通过 `http://localhost:8000/docs` 查看 Swagger。
+
+### 4. API 速览
+
+| Endpoint | 方法 | 说明 |
+| --- | --- | --- |
+| `/health` | GET | 检查模型与 catalog 是否就绪。 |
+| `/catalog/rebuild` | POST | 重建（或加载缓存）向量库，body: `{ "force": bool, "catalog_csv": "path" }`。 |
+| `/catalog/query` | POST | 根据 SKU 列表返回元数据。 |
+| `/recommend` | POST | 上传图片表单字段 `image`，可附 `topk`、`alpha_img`。返回检测框、Top-K SKU、可视化。 |
+
+示例：上传图片并拿到推荐
+
+```bash
+curl -X POST http://localhost:8000/recommend \
+  -F "image=@tests/demo.jpg" \
+  -F "topk=3" \
+  -F "alpha_img=0.7" \
+  -F "return_vis=true"
+```
+
+返回字段示例：
+
+```json
 {
+  "image_url": "/runs/uploads/1716524123456_demo.jpg",
+  "vis_url": "/runs/1716524123456_demo_vis.jpg",
   "instances": [
     {
-      "bbox": [x1,y1,x2,y2],
-      "class": "shoe",
+      "bbox": [77, 90, 240, 380],
+      "class": "bag",
       "top_k": [
-        {"sku_id": "SKU001", "score": 0.87, "title": "...", "brand": "...", "link": "..."}
+        {"sku_id": "SKU001", "title": "...", "brand": "...", "score": 0.87}
       ]
     }
   ]
 }
 ```
 
+通过 FastAPI 自动挂载：
 
-POST /catalog/rebuild
-Purpose：根据 catalog.csv 加载或重新计算所有 SKU 的图像/文本 embedding（保存在本地）
-前端可以设置一个按键用来重新生成embeddings
-Request(不传 force → 加载已有缓存（快）; 传 force=true → 重新跑一次 embedding（慢）)
+- `/static/...` 指向 `catalog`（商品主图）。
+- `/runs/...` 指向上传图片与可视化结果。
+
+## 前端（React + Vite）
+
+前端默认跑在 `http://localhost:5173`，通过 `VITE_API_BASE_URL` 指定后端地址。
+
+### 1. 安装依赖
+
 ```bash
-{
-  "force": true
-}
-```
-Response
-```bash
-{
-  "status": "success",
-  "catalog_size": 320,
-  "embedding_dim": 512,
-  "message": "Catalog embeddings rebuilt and stored in memory."
-}
+cd frontend
+npm install
 ```
 
+### 2. 配置 API 地址
 
-POST /catalog/query
-前端或推荐系统 发送一批 sku_id，后台从数据库 / CSV / 缓存中 返回对应商品信息和图片路径。（考虑到buget，商品图片可能还是保存于本地）
-Request：Content-Type: application/json
-Body:
-```bash
-{
-  "sku_ids": ["SKU001", "SKU003", "SKU017"]
-}
+创建 `frontend/.env.local`（或 `.env`）：
+
 ```
-Response
-```bash
-{
-  "items": [
-    {
-      "sku_id": "SKU001",
-      "title": "White low-top leather sneakers",
-      "brand": "Nike",
-      "price": 129.00,
-      "image_url": "/static/catalog/images/nike_white_lowtop.jpg"
-    },
-    {
-      "sku_id": "SKU003",
-      "title": "Beige tote bag with logo",
-      "brand": "Coach",
-      "price": 249.50,
-      "image_url": "/static/catalog/images/coach_tote_beige.jpg"
-    }
-  ],
-  "missing": ["SKU017"]
-}
+VITE_API_BASE_URL=http://localhost:8000
 ```
 
+### 3. 启动/构建
 
-## How to use Backend
+```bash
+# 开发热更新
+npm run dev
 
-### 1) 新建并进入环境（Python 3.10）
-```bash
-conda create -n pic2product python=3.11
-conda activate pic2product
+# 构建生产版本
+npm run build
+
+# 预览构建结果
+npm run preview
 ```
-### 2) 用 conda-forge 把“底座”装好（版本彼此兼容）
-```bash
-conda install -y -c conda-forge \
-    numpy=1.26.4 pandas=2.2.2 pillow tqdm \
-    opencv=4.10.0 \
-    protobuf=4.25.* abseil-cpp=20240116.*
-```
-### 3) 升级 pip 工具
-```bash
-python -m pip install -U pip setuptools wheel
-```
-### 4) 装 PyTorch（macOS 上直接 pip）
-```bash
-python -m pip install "torch==2.3.*" "torchvision==0.18.*"
-```
-### 5) 业务库（带上 ultralytics 依赖）
-```bash
-python -m pip install \
-  "ultralytics==8.3.30" "open_clip_torch==2.24.0" \
-  ftfy regex sentencepiece huggingface_hub \
-  matplotlib psutil py-cpuinfo "scipy<1.13" seaborn ultralytics-thop
-```
+
+前端会自动请求 `/recommend`、`/catalog/query` 并将 `/static`、`/runs` 等相对路径转换为带有 `VITE_API_BASE_URL` 前缀的可访问 URL。
+
+## 数据处理流程
+
+1. YOLOv8 检测出图片中的每个实例并裁剪出 ROI。
+2. 对裁剪图像编码得到图像向量；并与 catalog 内的 CLIP 文本向量进行融合匹配，得出 Top-K SKU。
+3. 将预测结果写入 `runs` 目录（上传原图 + 绘制 bounding box 的可视化图）。
+4. 前端通过 `/catalog/query` 拉取补充字段（价格、描述、图片链接），最终渲染卡片。
+
+## 常见问题
+
+- **运行时提示 “Catalog not ready”**：先调用 `/catalog/rebuild`。
+- **向量缓存过旧**：删除 `embeddings/*.npz` 与 `embeddings/catalog_index.json`，然后重新构建。
+- **图片路径 404**：确保 CSV 中的 `image_path` 指向 `catalog/` 内的文件，或修改 `STATIC_DIR`。
+- **前端访问不到静态资源**：确认 `.env.local` 的 `VITE_API_BASE_URL` 与后端端口一致。
