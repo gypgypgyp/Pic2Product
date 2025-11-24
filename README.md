@@ -18,15 +18,148 @@ Shopper ─→ React 前端 (Vite) ─→ FastAPI (/recommend, /catalog/*)
 
 ## 仓库结构
 
-| 目录 / 文件 | 说明 |
-| --- | --- |
-| `api.py` | FastAPI 入口，封装 /recommend、/catalog/rebuild、/catalog/query。 |
-| `mvp_reco.py` | YOLO + CLIP 推理与可视化逻辑，被 API 重用。 |
-| `catalog/` | 商品 CSV + 主图。CSV 至少包含 `sku_id,title,brand,image_path`。 |
-| `embeddings/` | 构建完成后的向量缓存（可删，重启时会重新写入）。 |
-| `runs/` | 上传的用户图片、推理可视化图。 |
-| `frontend/` | React + Vite 前端（`npm run dev` → http://localhost:5173）。 |
-| `requirements.txt` | 模型与数据处理依赖。FastAPI 依赖见下文。 |
+| 目录 / 文件        | 说明                                                              |
+| ------------------ | ----------------------------------------------------------------- |
+| `api.py`           | FastAPI 入口，封装 /recommend、/catalog/rebuild、/catalog/query。 |
+| `mvp_reco.py`      | YOLO + CLIP 推理与可视化逻辑，被 API 重用。                       |
+| `catalog/`         | 商品 CSV + 主图。CSV 至少包含 `sku_id,title,brand,image_path`。   |
+| `embeddings/`      | 构建完成后的向量缓存（可删，重启时会重新写入）。                  |
+| `runs/`            | 上传的用户图片、推理可视化图。                                    |
+| `frontend/`        | React + Vite 前端（`npm run dev` → http://localhost:5173）。      |
+| `requirements.txt` | 模型与数据处理依赖。FastAPI 依赖见下文。                          |
+
+## 📦 Dataset Setup 数据集准备（Amazon Berkeley Objects）
+
+Pic2Product 使用一个本地商品库（catalog），构建 CLIP 向量索引。
+
+为了快速获得一个较大的商品库，我们推荐使用公开的 [Amazon Berkeley Objects (ABO)](https://amazon-berkeley-objects.s3.amazonaws.com/index.html) 数据集中的 catalog 图片与列表元数据。
+
+以下说明如何下载 ABO、准备文件结构、以及执行数据合并。
+
+> ⚠️ 许可证提示：ABO 数据集使用 CC BY-NC 4.0（署名-非商业）许可，仅适用于非商业用途。请在使用前确认自己的使用场景符合要求。:contentReference[oaicite:2]{index=2}
+
+### 1. 下载 Amazon Berkeley Objects 数据集
+
+ABO 官方主页：
+
+👉 https://amazon-berkeley-objects.s3.us-east-1.amazonaws.com/index.html
+
+在仓库根目录下，进入 `catalog` 目录：
+
+```bash
+cd Pic2Product/catalog
+```
+
+请下载以下两个部分（最小可用版本）：
+
+✔ abo-images-small/
+
+包含缩放到 256px 的商品主图，以及 images.csv.gz（image metadata）。
+
+✔ abo-listings/
+
+包含 listings\_\*.json.gz（product metadata），其中含有
+
+item_id
+
+brand
+
+item_name
+
+main_image_id
+等字段。
+
+### 2. 将数据放置到项目目录
+
+```bash
+# 解压到本项目约定的位置
+tar xf abo-images-small.tar   # 得到 ./abo-images-small/...
+tar xf abo-listings.tar       # 得到 ./abo-listings/...
+```
+
+解压完成后，目录结构大致如下：
+
+```bash
+Pic2Product/
+│
+├── catalog/
+│   ├── images/            ← 最终所有 SKU 图片放在这里
+│   ├── catalog.csv        ← 最终商品元数据（由 data_merge.py 生成）
+│   │
+│   ├── abo-images-small/  ← 从 ABO 下载得到
+│   │     └── images/
+│   │         ├── small/
+│   │         └── metadata/images.csv.gz
+│   │
+│   ├── abo-listings/      ← 从 ABO 下载得到
+│         └── listings/
+│             └── metadata/listings_*.json.gz
+│
+├── data_merge.py          ← 合并脚本（生成 catalog.csv + 拷贝图片）
+├── api.py
+└── ...
+```
+
+⚠ 注意：catalog/images/ 将被写入大量新图片，请确保磁盘空间足够。
+
+### 3. 运行合并脚本
+
+在项目根目录运行：
+
+```bash
+cd Pic2Product
+python data_merge.py
+or
+python3 data_merge.py
+```
+
+脚本会：
+
+#### 1. 读取你本地自带的 catalog/catalog.csv
+
+#### 2. 读取 ABO 的 listings 与 images metadata
+
+#### 3. 对每个 ABO listing
+
+    生成安全的 sku_id（如 abo_amazon_com_B075X4QMX3）
+    选择合适语言的 title、brand
+    匹配对应的 main_image_id
+    将图片复制到：catalog/images/<sku_id>.jpg
+
+#### 4. 将所有结果写回：
+
+    catalog/catalog.csv   ← 覆盖原文件（仅本地，不会上传到 GitHub）
+
+### 4. 重建 Catalog Embeddings（第一次运行必须做）
+
+合并完成后，你需要重建 CLIP embedding 索引:
+
+```bash
+curl -X POST http://localhost:8000/catalog/rebuild \
+     -H "Content-Type: application/json" \
+     -d '{"force": true}'
+```
+
+API 会自动：
+
+读取新的 catalog/catalog.csv
+
+加载所有图片（若找不到会打印 [WARN] image not found）
+
+生成嵌入缓存：embeddings/catalog_embeddings.npz
+
+### 5. 常见问题（Warnings）
+
+⚠ [WARN] image not found: catalog/images/go_B0876X42NW.jpg
+
+这类 warning 代表：
+
+listings 中存在 main_image_id
+
+但对应图片文件在 ABO 中缺失（或 metadata 不完整）
+
+通常属于 ABO 原始数据问题，可以忽略。
+这些商品不会加入 embedding，不会影响正常功能。
 
 ## 环境要求
 
@@ -66,13 +199,13 @@ python api.py
 
 常用环境变量（可在 `.env` 或 shell 中设置）：
 
-| 变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| `CATALOG_CSV` | `catalog/catalog.csv` | CSV 路径 |
-| `EMBEDDINGS_DIR` | `embeddings` | 缓存 npz/json 的目录 |
-| `RUNS_DIR` | `runs` | 上传图像与可视化 |
-| `STATIC_DIR` | `catalog` | FastAPI 挂载为 `/static` 的根目录 |
-| `TOPK` | `3` | /recommend 默认返回的 SKU 数 |
+| 变量             | 默认值                | 说明                              |
+| ---------------- | --------------------- | --------------------------------- |
+| `CATALOG_CSV`    | `catalog/catalog.csv` | CSV 路径                          |
+| `EMBEDDINGS_DIR` | `embeddings`          | 缓存 npz/json 的目录              |
+| `RUNS_DIR`       | `runs`                | 上传图像与可视化                  |
+| `STATIC_DIR`     | `catalog`             | FastAPI 挂载为 `/static` 的根目录 |
+| `TOPK`           | `3`                   | /recommend 默认返回的 SKU 数      |
 
 首次运行或 CSV 发生变化时，需要构建向量缓存：
 
@@ -86,12 +219,12 @@ API 启动后可通过 `http://localhost:8000/docs` 查看 Swagger。
 
 ### 4. API 速览
 
-| Endpoint | 方法 | 说明 |
-| --- | --- | --- |
-| `/health` | GET | 检查模型与 catalog 是否就绪。 |
-| `/catalog/rebuild` | POST | 重建（或加载缓存）向量库，body: `{ "force": bool, "catalog_csv": "path" }`。 |
-| `/catalog/query` | POST | 根据 SKU 列表返回元数据。 |
-| `/recommend` | POST | 上传图片表单字段 `image`，可附 `topk`、`alpha_img`。返回检测框、Top-K SKU、可视化。 |
+| Endpoint           | 方法 | 说明                                                                                |
+| ------------------ | ---- | ----------------------------------------------------------------------------------- |
+| `/health`          | GET  | 检查模型与 catalog 是否就绪。                                                       |
+| `/catalog/rebuild` | POST | 重建（或加载缓存）向量库，body: `{ "force": bool, "catalog_csv": "path" }`。        |
+| `/catalog/query`   | POST | 根据 SKU 列表返回元数据。                                                           |
+| `/recommend`       | POST | 上传图片表单字段 `image`，可附 `topk`、`alpha_img`。返回检测框、Top-K SKU、可视化。 |
 
 示例：上传图片并拿到推荐
 
@@ -114,7 +247,7 @@ curl -X POST http://localhost:8000/recommend \
       "bbox": [77, 90, 240, 380],
       "class": "bag",
       "top_k": [
-        {"sku_id": "SKU001", "title": "...", "brand": "...", "score": 0.87}
+        { "sku_id": "SKU001", "title": "...", "brand": "...", "score": 0.87 }
       ]
     }
   ]
