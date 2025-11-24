@@ -1,5 +1,11 @@
 # Ignore product images
 static/catalog/images/
+static/catalog/abo-images-small/
+static/catalog/abo-listings/
+catalog/abo-images-small/
+catalog/abo-listings/
+catalog/images/
+catalog/catalog_merged.csv
 
 # Model embeddings & temp files
 embeddings/
