@@ -1,11 +1,10 @@
 # mvp_reco.py
-import os, json, math
+import os, json, math, csv
 from pathlib import Path
 from typing import List, Dict, Any, Tuple
 
 # import cv2
 import numpy as np
-import pandas as pd
 from PIL import Image, ImageDraw, ImageFont
 from tqdm import tqdm
 
@@ -58,11 +57,19 @@ class ClipEncoder:
 
 # ====== 商品库构建 ======
 def load_catalog(clip: ClipEncoder, csv_path: str) -> Dict[str, Any]:
-    df = pd.read_csv(csv_path)
-    assert {"sku_id", "title", "brand", "image_path"}.issubset(df.columns), "CSV 缺少必须列"
+    with open(csv_path, "r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        if not reader.fieldnames:
+            raise RuntimeError("CSV 格式错误，缺少表头。")
+        required = {"sku_id", "title", "brand", "image_path"}
+        missing = required - set(reader.fieldnames)
+        if missing:
+            raise RuntimeError(f"CSV 缺少必须列: {', '.join(sorted(missing))}")
+        rows_csv = list(reader)
+
     imgs, img_embs, txts, txt_embs, rows = [], [], [], [], []
 
-    for _, row in tqdm(df.iterrows(), total=len(df), desc="Building catalog embeddings"):
+    for row in tqdm(rows_csv, total=len(rows_csv), desc="Building catalog embeddings"):
         sku = str(row["sku_id"])
         title = str(row["title"])
         brand = str(row["brand"])
@@ -224,7 +231,7 @@ def recommend_for_image(image_path: str, out_dir: Path):
         }, f, ensure_ascii=False, indent=2)
 
     # 控制台友好输出
-    print(f"\n[OK] 可视化: {img_out}")
+    print(f"\n[OK] visualization: {img_out}")
     print(f"[OK] JSON: {json_out}\n")
     for i, inst in enumerate(results, 1):
         print(f"Instance #{i} [{inst['class']} @ {inst['bbox']}] det_conf={inst['det_conf']:.2f}")

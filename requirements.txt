@@ -7,3 +7,9 @@ opencv-python
 pandas
 numpy
 tqdm
+
+# --- Backend dependencies ---
+fastapi>=0.110
+uvicorn[standard]>=0.30
+python-multipart
+pydantic>=2

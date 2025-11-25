@@ -252,10 +252,10 @@ export default function Pic2ProductDemo() {
                               {typeof price === "number" ? (
                                 <>${price}</>
                               ) : (
-                                <span className="text-xs text-gray-400">价格暂无</span>
+                                <span className="text-xs text-gray-400">no price listing</span>
                               )}
                             </div>
-                            <div className="text-xs text-gray-500">相似度：{t.score.toFixed(2)}</div>
+                            <div className="text-xs text-gray-500">Similarity score: {t.score.toFixed(2)}</div>
                             {t.link && (
                               <a href={t.link} target="_blank" className="text-xs text-blue-600 hover:underline">查看详情</a>
                             )}

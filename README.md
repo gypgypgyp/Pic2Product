@@ -159,9 +159,7 @@ cd Pic2Product
 python -m venv .venv
 source .venv/bin/activate # Windows use .venv\Scripts\activate
 
-pip install -U pip setuptools wheel
 pip install -r requirements.txt
-pip install "fastapi>=0.110" "uvicorn[standard]>=0.30" python-multipart "pydantic>=2"
 ```
 
 > If GPU is needed, you can separately install the matching version of `torch`/`torchvision` according to your platform.RetryTo run code, enable code execution and file creation in Settings > Capabilities.
