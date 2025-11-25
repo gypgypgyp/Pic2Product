@@ -1,3 +1,4 @@
+import argparse
 import csv
 import gzip
 import json
@@ -41,8 +42,9 @@ def load_image_meta():
     return mapping
 
 
-def iter_listings():
+def iter_listings(limit=None):
     """Yield product dicts from all listings_*.json.gz files."""
+    count = 0
     for gz_path in sorted(ABO_LISTINGS_META_DIR.glob("listings_*.json.gz")):
         with gzip.open(gz_path, "rt", encoding="utf-8") as f:
             for line in f:
@@ -50,9 +52,12 @@ def iter_listings():
                 if not line:
                     continue
                 yield json.loads(line)
+                count += 1
+                if limit is not None and count >= limit:
+                    return
 
 
-def main():
+def main(limit=None):
     # 1) Load existing rows
     rows = []
     with open(EXISTING_CATALOG, newline="", encoding="utf-8") as f:
@@ -64,7 +69,7 @@ def main():
     image_meta = load_image_meta()
 
     # 3) Process ABO listings
-    for prod in iter_listings():
+    for prod in iter_listings(limit=limit):
         item_id = prod.get("item_id")
         domain_name = prod.get("domain_name")
         main_image_id = prod.get("main_image_id")
@@ -117,4 +122,5 @@ def main():
 
 
 if __name__ == "__main__":
+    # main(limit=100)
     main()

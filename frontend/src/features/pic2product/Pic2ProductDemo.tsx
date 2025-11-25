@@ -124,12 +124,12 @@ export default function Pic2ProductDemo() {
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900">
       <header className="sticky top-0 z-10 bg-white/80 backdrop-blur border-b border-gray-200">
-        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
-          <h1 className="text-xl font-semibold">Pic2Product Demo</h1>
+        <div className="w-full px-4 md:px-8 py-3 flex items-center justify-between">
+          <h1 className="text-xl font-semibold">Pic2Product</h1>
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 py-6 grid grid-cols-1 lg:grid-cols-5 gap-6">
+      <main className="w-full px-4 md:px-8 py-6 grid grid-cols-1 lg:grid-cols-5 gap-6">
         {/* 左侧：上传 + 图片预览 */}
         <section className="lg:col-span-3">
           <div className="bg-white rounded-2xl shadow p-4">
@@ -271,7 +271,7 @@ export default function Pic2ProductDemo() {
         </section>
       </main>
 
-      <footer className="max-w-6xl mx-auto px-4 pb-12 text-xs text-gray-500">
+      <footer className="w-full px-4 md:px-8 pb-12 text-xs text-gray-500">
         <div className="mt-6">Tip: If you always get no results, please confirm that the backend has called <code>/catalog/rebuild</code> to generate embedding, and ensure that the directory has product images and metadata.</div>
       </footer>
     </div>
