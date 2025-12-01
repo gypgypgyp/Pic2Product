@@ -1,4 +1,5 @@
 # mvp_reco.py
+import sqlite3
 import os, json, math, csv
 from pathlib import Path
 from typing import List, Dict, Any, Tuple
@@ -23,6 +24,9 @@ ALPHA_IMG = 0.7            # 图像相似度权重（图像 vs 文本 = 0.7 : 0.
 CATALOG_CSV = "catalog/catalog.csv"
 RUNS_DIR = Path("runs")
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+BASE_DIR = Path(__file__).resolve().parent
+DB_PATH = BASE_DIR / "catalog" / "catalog.db"
 
 # 仅为了可视化（不同系统字体可能不一样）
 def _get_font(size=14):
@@ -105,6 +109,46 @@ def load_catalog(clip: ClipEncoder, csv_path: str) -> Dict[str, Any]:
         "img_embs": np.vstack(img_embs),   # [N, D]
         "txt_embs": np.vstack(txt_embs),   # [N, D]
     }
+
+# ====== 数据库交互 ======
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+# ====== 从数据库加载商品库 ======
+def load_catalog_from_db(conn):
+    rows = conn.execute("""
+        SELECT sku_id, title, brand, image_path
+        FROM products
+        ORDER BY sku_id
+    """).fetchall()
+
+    catalog_rows = [
+        {
+            "sku_id": r["sku_id"],
+            "title": r["title"],
+            "brand": r["brand"],
+            "image_path": r["image_path"],
+        }
+        for r in rows
+    ]
+    return catalog_rows
+
+# ====== 保存商品库向量到数据库 ======
+def save_embeddings_to_db(conn, catalog_rows, img_embs: np.ndarray):
+    dim = img_embs.shape[1]
+    data = []
+    for row, vec in zip(catalog_rows, img_embs):
+        data.append(
+            (row["sku_id"], vec.astype("float32").tobytes(), dim)
+        )
+
+    conn.executemany("""
+        INSERT OR REPLACE INTO embeddings (sku_id, embedding, dim)
+        VALUES (?,?,?)
+    """, data)
+    conn.commit()
 
 # 余弦相似度
 def cos_sim(a: np.ndarray, b: np.ndarray) -> np.ndarray:
