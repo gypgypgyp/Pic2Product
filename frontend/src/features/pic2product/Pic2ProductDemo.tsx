@@ -19,10 +19,10 @@ export default function Pic2ProductDemo() {
   const [instances, setInstances] = useState<DetectInstance[]>([]);
   const [skuMap, setSkuMap] = useState<Record<string, ProductItem>>({});
 
-  // 参数（仅前端使用，不改变后端 API）
-  const [topK, setTopK] = useState<number>(5); // 只用于前端展示截断
-  const [scoreThreshold, setScoreThreshold] = useState<number>(0.0); // 只用于前端过滤
-  const alphaImg = 0.7; // 与后端默认一致
+  // Parameters
+  const [topK, setTopK] = useState<number>(5); // Frontend display truncation
+  const [scoreThreshold, setScoreThreshold] = useState<number>(0.0); // Frontend filtering
+  const alphaImg = 0.7; // Consistent with backend default
 
   // image measure
   const imgRef = useRef<HTMLImageElement | null>(null);
@@ -37,7 +37,7 @@ export default function Pic2ProductDemo() {
     return () => URL.revokeObjectURL(url);
   }, [file]);
 
-  // 当图片加载后记录原始与显示尺寸
+  // When the image is loaded, record the original and displayed dimensions.
   const onImgLoad = () => {
     const img = imgRef.current;
     if (!img) return;
@@ -45,7 +45,7 @@ export default function Pic2ProductDemo() {
     setImgDisplay({ w: img.clientWidth, h: img.clientHeight });
   };
 
-  // 计算缩放比（原图 → 显示图）
+  // Calculate the scale factor (original → displayed)
   const scale = useMemo(
     () => ({ x: imgDisplay.w / imgNatural.w, y: imgDisplay.h / imgNatural.h }),
     [imgDisplay.w, imgDisplay.h, imgNatural.w, imgNatural.h]
@@ -56,7 +56,7 @@ export default function Pic2ProductDemo() {
     setError(null);
     const f = e.target.files?.[0] || null;
     if (!f) return;
-    // 简单限制：图片 ≤ 5MB
+    // Simple restriction: image ≤ 5MB
     if (f.size > 5 * 1024 * 1024) {
       setError("The image is too large, suggest ≤5MB.");
       return;
@@ -78,6 +78,7 @@ export default function Pic2ProductDemo() {
     setVisUrl(null);
 
     try {
+      // 1. Upload & Recommend
       const data = await callRecommend({
         image: file,
         topk: topK,
@@ -85,7 +86,7 @@ export default function Pic2ProductDemo() {
         returnVis: true,
       });
 
-      // 安全兜底
+      // 1.1 Error Handling
       if (!data.instances || data.instances.length === 0) {
         setInstances([]);
         setError("No products detected");
@@ -93,7 +94,7 @@ export default function Pic2ProductDemo() {
         return;
       }
 
-      // 前端按 scoreThreshold 过滤 & topK 截断（不改变后端）
+      // 1.2 Frontend filtering & topK truncation (does not change backend)
       const filtered = data.instances.map((ins) => ({
         ...ins,
         top_k: ins.top_k.filter((t) => t.score >= scoreThreshold).slice(0, topK),
@@ -103,15 +104,15 @@ export default function Pic2ProductDemo() {
 
       setInstances(filtered);
 
-      // 收集所有 sku_id 去查详情（用于补齐 price/image_url）
+      // 2. Collect all sku_id for detail query
       const skuSet = new Set<string>();
       filtered.forEach((ins) => ins.top_k?.forEach((t) => skuSet.add(t.sku_id)));
       if (skuSet.size > 0) {
+        // 2.2 Batch query for details of Price/Image
         const q = await catalogQuery(Array.from(skuSet));
-        const map: Record<string, ProductItem> = {};
+        const map: Record<string, ProductItem> = {}; // Store in skuMap for O(1) access
         q.items?.forEach((it) => (map[it.sku_id] = it));
         setSkuMap(map);
-        // q.missing 如有需要可用于 UI 提示
       }
     } catch (err: any) {
       setError(err?.message || "An unknown error occurred");
@@ -130,7 +131,7 @@ export default function Pic2ProductDemo() {
       </header>
 
       <main className="w-full px-4 md:px-8 py-6 grid grid-cols-1 lg:grid-cols-5 gap-6">
-        {/* 左侧：上传 + 图片预览 */}
+        {/* Left: Upload + Image Preview */}
         <section className="lg:col-span-3">
           <div className="bg-white rounded-2xl shadow p-4">
             <div className="flex items-center justify-between">
@@ -153,7 +154,7 @@ export default function Pic2ProductDemo() {
 
             <div className="mt-3 flex items-center gap-3">
               <input type="file" accept="image/*" onChange={handleFileChange} className="block" />
-              <button onClick={handleRecommend} disabled={loading || !file} className="px-4 py-2 rounded-xl bg-black text-white disabled:opacity-50">
+              <button onClick={handleRecommend} disabled={loading || !file} className="px-4 py-2 rounded-xl bg-black text-gray-800 disabled:opacity-50">
                 {loading ? "Analyzing..." : "Start Recommendation"}
               </button>
             </div>
@@ -171,7 +172,7 @@ export default function Pic2ProductDemo() {
                     className="max-h-[60vh] w-auto rounded-xl border border-gray-200"
                   />
 
-                  {/* 叠加 bbox */}
+                  {/* Overlay bbox */}
                   {instances.map((ins, idx) => {
                     const [x1, y1, x2, y2] = ins.bbox;
                     const left = x1 * scale.x;
@@ -190,7 +191,7 @@ export default function Pic2ProductDemo() {
                 </div>
               ) : (
                 <div className="h-48 grid place-items-center text-gray-400 border-2 border-dashed rounded-2xl">
-                  选择一张图片预览
+                  Select an image to preview
                 </div>
               )}
 
@@ -212,7 +213,7 @@ export default function Pic2ProductDemo() {
           </div>
         </section>
 
-        {/* 右侧：推荐结果列表 */}
+        {/* Right: Recommendation results list */}
         <section className="lg:col-span-2">
           <div className="bg-white rounded-2xl shadow p-4 h-full">
             <h2 className="text-lg font-semibold">2) Recommendation results</h2>
@@ -236,14 +237,14 @@ export default function Pic2ProductDemo() {
                       const title = prod?.title || t.title || t.sku_id;
                       const brand = prod?.brand || t.brand || "";
                       const price = prod?.price;
-                      const imageUrl = prod?.image_url || t.image_url; // 后端返回的 image_url 作为兜底
+                      const imageUrl = prod?.image_url || t.image_url; // The image_url returned by the backend is used as a fallback.
 
                       return (
                         <article key={t.sku_id + j} className="border rounded-xl overflow-hidden hover:shadow">
                           {imageUrl ? (
                             <img src={imageUrl} alt={title} className="w-full h-36 object-cover" />
                           ) : (
-                            <div className="w-full h-36 grid place-items-center text-gray-400 bg-gray-50">无图片</div>
+                            <div className="w-full h-36 grid place-items-center text-gray-400 bg-gray-50">No image</div>
                           )}
                           <div className="p-3 space-y-1">
                             <div className="text-sm font-medium line-clamp-2">{title}</div>
@@ -257,7 +258,7 @@ export default function Pic2ProductDemo() {
                             </div>
                             <div className="text-xs text-gray-500">Similarity score: {t.score.toFixed(2)}</div>
                             {t.link && (
-                              <a href={t.link} target="_blank" className="text-xs text-blue-600 hover:underline">查看详情</a>
+                              <a href={t.link} target="_blank" className="text-xs text-blue-600 hover:underline">View Details</a>
                             )}
                           </div>
                         </article>
