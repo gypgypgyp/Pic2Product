@@ -15,7 +15,7 @@ from PIL import Image
 # Reuse your MVP pieces
 from mvp_reco import (
     ClipEncoder, load_catalog, detect_instances, cos_sim, draw_and_save,
-    YOLO, DEVICE
+    YOLO, DEVICE, get_db, load_catalog_from_db, save_embeddings_to_db
 )
 
 # ---------------------------
@@ -123,27 +123,87 @@ def _try_load_cache():
         print(f"[WARN] Failed to load cache: {e}")
         return False
 
+def _try_load_from_db() -> bool:
+    try:
+        conn = get_db()
+        rows = conn.execute("""
+            SELECT p.sku_id, p.title, p.brand, p.image_path, e.embedding, e.dim
+            FROM products p
+            JOIN embeddings e ON p.sku_id = e.sku_id
+            ORDER BY p.sku_id
+        """).fetchall()
+        conn.close()
+
+        if not rows:
+            return False
+
+        catalog_rows = []
+        embs = []
+        dim = rows[0]["dim"]
+
+        for r in rows:
+            catalog_rows.append({
+                "sku_id": r["sku_id"],
+                "title": r["title"],
+                "brand": r["brand"],
+                "image_path": r["image_path"],
+            })
+            v = np.frombuffer(r["embedding"], dtype="float32").reshape(dim)
+            embs.append(v)
+
+        state.catalog_rows = catalog_rows
+        state.img_embs = np.stack(embs, axis=0)
+        state.embedding_dim = dim
+        # if you also store text embeddings, load similarly
+        return True
+    except Exception as e:
+        print(f"[WARN] failed to load embeddings from DB: {e}")
+        return False
+
+
 def _build_catalog(clip: ClipEncoder, csv_path: Path, force: bool = False):
+    # Try DB first
+    if not force and _try_load_from_db():
+        return {
+            "status": "loaded_from_db",
+            "catalog_size": len(state.catalog_rows),
+            "embedding_dim": state.embedding_dim,
+            "message": "Loaded embeddings from SQLite.",
+        }
+    
+    # Then try cache
     if not force and _try_load_cache():
         return {
-            "status": "loaded",
+            "status": "loaded_from_cache",
             "catalog_size": len(state.catalog_rows),
             "embedding_dim": state.embedding_dim,
             "message": "Loaded embeddings from cache."
         }
 
+    # Otherwise, rebuild from scratch
     catalog = load_catalog(clip, str(csv_path))
     state.catalog_rows = catalog["rows"]
     state.img_embs = catalog["img_embs"]
     state.txt_embs = catalog["txt_embs"]
     state.embedding_dim = int(state.img_embs.shape[1])
 
+    # NEW: Save to DB
+    try:
+        conn = get_db()
+        save_embeddings_to_db(conn, state.catalog_rows, state.img_embs)
+        conn.close()
+        db_msg = "Embeddings also persisted to SQLite."
+    except Exception as e:
+        db_msg = f"WARNING: failed to save embeddings to DB: {e}"
+        print("[WARN]", db_msg)
+
+    # Optionally still keep .npz cache as secondary
     _save_cache(state.catalog_rows, state.img_embs, state.txt_embs)
     return {
         "status": "success",
         "catalog_size": len(state.catalog_rows),
         "embedding_dim": state.embedding_dim,
-        "message": "Catalog embeddings rebuilt and cached."
+        "message": f"Catalog embeddings rebuilt and cached. {db_msg}",
     }
 
 
@@ -156,9 +216,9 @@ def _startup():
     state.det = YOLO("yolov8n.pt")
     state.clip = ClipEncoder(model_name="ViT-B-32", pretrained="openai")
 
-    # Load cache or best-effort build
-    if not _try_load_cache() and state.catalog_path.exists():
-        print(f"[INFO] Building catalog from {state.catalog_path} ...")
+    # Auto-load catalog if exists
+    if state.catalog_path.exists():
+        print(f"[INFO] Initializing catalog from {state.catalog_path} ...")
         _build_catalog(state.clip, state.catalog_path, force=False)
 
 
@@ -170,7 +230,8 @@ def health():
     return {
         "ok": True,
         "models_ready": state.det is not None and state.clip is not None,
-        "catalog_ready": state.img_embs is not None and state.txt_embs is not None
+        "catalog_ready": state.img_embs is not None # and state.txt_embs is not None
+        # okay with image-only similarity when DB is the source
     }
 
 @app.post("/catalog/rebuild")
@@ -208,7 +269,7 @@ async def recommend(
     alpha_img: float = Form(ALPHA_IMG_DEFAULT),
     return_vis: bool = Form(True),
 ):
-    if state.img_embs is None or state.txt_embs is None:
+    if state.img_embs is None:  # or state.txt_embs is None:
         return JSONResponse(status_code=400, content={"error": "Catalog not ready. Call /catalog/rebuild first."})
 
     # Save upload
@@ -225,8 +286,13 @@ async def recommend(
     for inst in instances:
         emb = state.clip.encode_image(inst["crop"])
         s_img = cos_sim(emb, state.img_embs)
-        s_txt = cos_sim(emb, state.txt_embs)
-        score = alpha_img * s_img + (1 - alpha_img) * s_txt
+        # s_txt = cos_sim(emb, state.txt_embs)
+        # score = alpha_img * s_img + (1 - alpha_img) * s_txt
+        if state.txt_embs is not None:
+            s_txt = cos_sim(emb, state.txt_embs)
+            score = alpha_img * s_img + (1 - alpha_img) * s_txt
+        else:
+            score = s_img
 
         idx = np.argsort(-score)[: int(topk)]
         recos = []

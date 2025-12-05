@@ -6,6 +6,7 @@ catalog/abo-images-small/
 catalog/abo-listings/
 catalog/images/
 catalog/catalog_merged.csv
+catalog/catalog.db
 
 # Model embeddings & temp files
 embeddings/

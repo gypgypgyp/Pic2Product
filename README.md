@@ -20,16 +20,16 @@ Shopper ─→ React Frontend (Vite) ─→ FastAPI (/recommend, /catalog/*)
 
 ## Repository Structure
 
-| Path | Description |
-|------|-------------|
-| `api.py` | FastAPI app (`/recommend`, `/catalog/rebuild`, `/catalog/query`) |
-| `mvp_reco.py` | YOLO + CLIP inference and visualization logic |
-| `data_merge.py` | Merge ABO metadata + images into your local catalog CSV & image folder |
-| `catalog/` | CSV + product images, including a csv of `sku_id,title,brand,image_path`  |
-| `embeddings/` | Cached embeddings |
-| `runs/` | Uploaded images & visual output |
-| `frontend/` | React + Vite （`npm run dev` → http://localhost:5173）|
-| `requirements.txt` | Dependencies |
+| Path               | Description                                                              |
+| ------------------ | ------------------------------------------------------------------------ |
+| `api.py`           | FastAPI app (`/recommend`, `/catalog/rebuild`, `/catalog/query`)         |
+| `mvp_reco.py`      | YOLO + CLIP inference and visualization logic                            |
+| `data_merge.py`    | Merge ABO metadata + images into your local catalog CSV & image folder   |
+| `catalog/`         | CSV + product images, including a csv of `sku_id,title,brand,image_path` |
+| `embeddings/`      | Cached embeddings                                                        |
+| `runs/`            | Uploaded images & visual output                                          |
+| `frontend/`        | React + Vite （`npm run dev` → http://localhost:5173）                   |
+| `requirements.txt` | Dependencies                                                             |
 
 ## Data Processing Flow
 
@@ -37,7 +37,6 @@ Shopper ─→ React Frontend (Vite) ─→ FastAPI (/recommend, /catalog/*)
 2. The cropped image is encoded to generate an image vector, which is then fused and matched with CLIP text vectors from the catalog to obtain Top-K SKUs.
 3. Prediction results are written to the `runs` directory (uploaded original image + visualization with bounding boxes).
 4. The frontend fetches additional fields (price, description, image links) via `/catalog/query` and renders the cards.
-
 
 ## Environment Requirements
 
@@ -47,7 +46,6 @@ Shopper ─→ React Frontend (Vite) ─→ FastAPI (/recommend, /catalog/*)
 - GPU optional
 
 ## How to use
-
 
 ### 1. Dataset Setup (Amazon Berkeley Objects)
 
@@ -59,10 +57,10 @@ The following explains how to download ABO, prepare the file structure, and perf
 
 > ⚠️ License Notice: The ABO dataset uses the CC BY-NC 4.0 (Attribution-NonCommercial) license and is only suitable for non-commercial use. Please confirm that your use case complies with these requirements before use.RetryTo run code, enable code execution and file creation in Settings > Capabilities.
 
-
-#### 1.  Download the Amazon Berkeley Objects Dataset
+#### 1. Download the Amazon Berkeley Objects Dataset
 
 From the repository root directory, navigate to the `catalog` directory:
+
 ```bash
 cd Pic2Product/catalog
 ```
@@ -70,7 +68,6 @@ cd Pic2Product/catalog
 ABO official homepage:
 
 👉 https://amazon-berkeley-objects.s3.us-east-1.amazonaws.com/index.html
-
 
 Please download the following two components (minimum viable version):
 
@@ -96,6 +93,7 @@ tar xf abo-listings.tar       # Results in ./abo-listings/...
 ```
 
 After extraction, the directory structure should look approximately like this:
+
 ```bash
 Pic2Product/
 │
@@ -119,9 +117,7 @@ Pic2Product/
 
 ⚠ Note: A large number of new images will be written to catalog/images/. Please ensure sufficient disk space (>3.20 GB) is available.RetryTo run code, enable code execution and file creation in Settings > Capabilities.
 
-
 #### 3. Run the Merge Script
-
 
 Run from the project root directory:
 
@@ -130,25 +126,34 @@ cd Pic2Product
 python data_merge.py
 ```
 
-
 The script will:
 
-  Read your local catalog/catalog.csv
+Read your local catalog/catalog.csv
 
-  Read ABO listings and images metadata
+Read ABO listings and images metadata
 
-  For each ABO listing:
+For each ABO listing:
 
     Generate a safe sku_id (e.g., abo_amazon_com_B075X4QMX3)
     Select appropriate language for title and brand
     Match the corresponding main_image_id
     Copy the image to: catalog/images/<sku_id>.jpgRetryTo run code, enable code execution and file creation in Settings > Capabilities.
 
-  Write all results back to:
+Write all results back to:
 
     catalog/catalog.csv   ← Overwrites the original file (local only, won't be uploaded to GitHub)
 
+Catalog storage:
 
+```
+catalog/catalog.csv → loaded into SQLite catalog/catalog.db (products table)
+```
+
+Run:
+
+```
+python scripts/init_db_from_csv.py
+```
 
 ### 2. Backend Setup (FastAPI)
 
@@ -166,8 +171,9 @@ pip install -r requirements.txt
 
 #### 2. Prepare Catalog (see 1. Dataset setup)
 
-make sure you have: 
+make sure you have:
 YOLO model: yolov8n.pt
+
 1. `catalog/catalog.csv`: Provides SKU metadata and image path (to the catalog)
 2. `catalog/images/`: Corresponds to the `image_path` in the CSV.
 3. `yolov8n.pt`: Already included in the repository, but can be replaced with a larger model.
@@ -182,19 +188,18 @@ python api.py
 
 Common environment variables (can be set in `.env` or shell):
 
-| Variable         | Default Value         | Description                                      |
-| ---------------- | --------------------- | ------------------------------------------------ |
-| `CATALOG_CSV`    | `catalog/catalog.csv` | CSV path                                         |
-| `EMBEDDINGS_DIR` | `embeddings`          | Directory for caching npz/json files             |
-| `RUNS_DIR`       | `runs`                | Uploaded images and visualizations               |
-| `STATIC_DIR`     | `catalog`             | Root directory mounted as `/static` in FastAPI   |
-| `TOPK`           | `3`                   | Default number of SKUs returned by /recommend    |
-
-
+| Variable         | Default Value         | Description                                    |
+| ---------------- | --------------------- | ---------------------------------------------- |
+| `CATALOG_CSV`    | `catalog/catalog.csv` | CSV path                                       |
+| `EMBEDDINGS_DIR` | `embeddings`          | Directory for caching npz/json files           |
+| `RUNS_DIR`       | `runs`                | Uploaded images and visualizations             |
+| `STATIC_DIR`     | `catalog`             | Root directory mounted as `/static` in FastAPI |
+| `TOPK`           | `3`                   | Default number of SKUs returned by /recommend  |
 
 #### 4. Rebuild Catalog Embeddings (Required for First Run)
 
 You need to rebuild the CLIP embedding index:
+
 ```bash
 curl -X POST http://localhost:8000/catalog/rebuild \
      -H "Content-Type: application/json" \
@@ -209,7 +214,7 @@ The API will automatically:
 
 After the API starts, you can view the Swagger documentation at `http://localhost:8000/docs`.
 
-  Common Issues (Warnings):
+Common Issues (Warnings):
 
 ⚠ [WARN] image not found: catalog/images/go_B0876X42NW.jpg
 
@@ -221,22 +226,23 @@ This type of warning indicates:
 This is typically an issue with the original ABO data and can be ignored.
 These products will not be added to the embeddings and will not affect normal functionality.
 
-
-
 ### 3. API Overview
 
-| Endpoint           | Method | Description                                                                                              |
-| ------------------ | ------ | -------------------------------------------------------------------------------------------------------- |
-| `/health`          | GET    | Check if models and catalog are ready.                                                                   |
-| `/catalog/rebuild` | POST   | Rebuild (or load cached) vector database, body: `{ "force": bool, "catalog_csv": "path" }`.             |
-| `/catalog/query`   | POST   | Return metadata based on SKU list.                                                                       |
+| Endpoint           | Method | Description                                                                                                                |
+| ------------------ | ------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `/health`          | GET    | Check if models and catalog are ready.                                                                                     |
+| `/catalog/rebuild` | POST   | Rebuild (or load cached) vector database, body: `{ "force": bool, "catalog_csv": "path" }`.                                |
+| `/catalog/query`   | POST   | Return metadata based on SKU list.                                                                                         |
 | `/recommend`       | POST   | Upload image via form field `image`, optional `topk`, `alpha_img`. Returns detection boxes, Top-K SKUs, and visualization. |
 
 Example: Upload image and get recommendations
+
 ```bash
+
 ```
 
 Example response:
+
 ```json
 {
   "image_url": "/runs/uploads/1716524123456_demo.jpg",
@@ -263,11 +269,13 @@ Automatic FastAPI mounts:
 The frontend runs on `http://localhost:5173` by default and uses `VITE_API_BASE_URL` to specify the backend address.
 
 check api status:
+
 ```bash
 curl http://localhost:8000/health
 ```
 
 ### 1. Install Dependencies
+
 ```bash
 cd frontend
 npm install
@@ -282,6 +290,7 @@ VITE_API_BASE_URL=http://localhost:8000
 ```
 
 ### 3. Start/Build
+
 ```bash
 # Development with hot reload
 npm run dev
