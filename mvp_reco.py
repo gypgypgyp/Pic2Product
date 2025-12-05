@@ -14,12 +14,12 @@ import torchvision.transforms as T
 import open_clip
 from ultralytics import YOLO
 
-# ====== 可调参数 ======
-MODEL_DET = "yolov8n.pt"   # 轻量，够用
+# ====== Tunable parameters ======
+MODEL_DET = "yolov8n.pt"   # Lightweight and sufficient
 CONF_THRES = 0.25
 IOU_THRES = 0.45
-TOPK = 1                   # 每个实例返回的 SKU 数
-ALPHA_IMG = 0.7            # 图像相似度权重（图像 vs 文本 = 0.7 : 0.3）
+TOPK = 1                   # Number of SKUs returned per instance
+ALPHA_IMG = 0.7            # Image similarity weight (image vs text = 0.7 : 0.3)
 
 CATALOG_CSV = "catalog/catalog.csv"
 RUNS_DIR = Path("runs")
@@ -28,14 +28,14 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "catalog" / "catalog.db"
 
-# 仅为了可视化（不同系统字体可能不一样）
+# For visualization only (font appearance may differ across systems)
 def _get_font(size=14):
     try:
         return ImageFont.truetype("DejaVuSans.ttf", size)
     except:
         return ImageFont.load_default()
 
-# ====== OpenCLIP 封装 ======
+# ====== OpenCLIP Wrapper ======
 class ClipEncoder:
     def __init__(self, model_name="ViT-B-32", pretrained="openai", device=DEVICE):
         self.device = device
@@ -59,16 +59,16 @@ class ClipEncoder:
         feat = feat / feat.norm(dim=-1, keepdim=True)
         return feat.squeeze(0).detach().cpu().numpy()
 
-# ====== 商品库构建 ======
+# ====== Catalog construction ======
 def load_catalog(clip: ClipEncoder, csv_path: str) -> Dict[str, Any]:
     with open(csv_path, "r", encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)
         if not reader.fieldnames:
-            raise RuntimeError("CSV 格式错误，缺少表头。")
+            raise RuntimeError("Invalid CSV format: missing header row.")
         required = {"sku_id", "title", "brand", "image_path"}
         missing = required - set(reader.fieldnames)
         if missing:
-            raise RuntimeError(f"CSV 缺少必须列: {', '.join(sorted(missing))}")
+            raise RuntimeError(f"CSV is missing required columns: {', '.join(sorted(missing))}")
         rows_csv = list(reader)
 
     imgs, img_embs, txts, txt_embs, rows = [], [], [], [], []
@@ -102,7 +102,7 @@ def load_catalog(clip: ClipEncoder, csv_path: str) -> Dict[str, Any]:
         })
 
     if not rows:
-        raise RuntimeError("Catalog is empty. 请放入至少一条商品及主图。")
+        raise RuntimeError("Catalog is empty. Please add at least one product with a main image.")
 
     return {
         "rows": rows,
@@ -110,13 +110,13 @@ def load_catalog(clip: ClipEncoder, csv_path: str) -> Dict[str, Any]:
         "txt_embs": np.vstack(txt_embs),   # [N, D]
     }
 
-# ====== 数据库交互 ======
+# ====== Database interactions ======
 def get_db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
-# ====== 从数据库加载商品库 ======
+# ====== Load catalog from database ======
 def load_catalog_from_db(conn):
     rows = conn.execute("""
         SELECT sku_id, title, brand, image_path
@@ -135,7 +135,7 @@ def load_catalog_from_db(conn):
     ]
     return catalog_rows
 
-# ====== 保存商品库向量到数据库 ======
+# ====== Save catalog embeddings to database ======
 def save_embeddings_to_db(conn, catalog_rows, img_embs: np.ndarray):
     dim = img_embs.shape[1]
     data = []
@@ -150,12 +150,12 @@ def save_embeddings_to_db(conn, catalog_rows, img_embs: np.ndarray):
     """, data)
     conn.commit()
 
-# 余弦相似度
+# Cosine similarity
 def cos_sim(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     # a: [D], b: [N,D] -> [N]
     return (b @ a) / (np.linalg.norm(b, axis=1) * np.linalg.norm(a) + 1e-8)
 
-# ====== 检测 + 实例裁剪 ======
+# ====== Detection + Instance Cropping ======
 def detect_instances(det_model: YOLO, image_path: str) -> Tuple[Image.Image, List[Dict[str, Any]]]:
     res = det_model.predict(
         source=image_path, conf=CONF_THRES, iou=IOU_THRES, device=0 if DEVICE=="cuda" else "cpu", verbose=False
@@ -171,7 +171,7 @@ def detect_instances(det_model: YOLO, image_path: str) -> Tuple[Image.Image, Lis
             x1, y1, x2, y2 = b.xyxy[0].tolist()
             cls_id = int(b.cls[0].item())
             conf = float(b.conf[0].item())
-            # 安全裁剪
+            # Safe cropping
             x1, y1 = max(0, int(x1)), max(0, int(y1))
             x2, y2 = min(W-1, int(x2)), min(H-1, int(y2))
             if x2 <= x1 or y2 <= y1:
@@ -185,7 +185,7 @@ def detect_instances(det_model: YOLO, image_path: str) -> Tuple[Image.Image, Lis
             })
     return pil, instances
 
-# ====== 可视化与结果保存 ======
+# ====== Visualization and result saving ======
 def draw_and_save(pil: Image.Image, recos_per_inst: List[Dict[str, Any]], out_path: Path):
     img = pil.copy()
     draw = ImageDraw.Draw(img)
@@ -196,10 +196,10 @@ def draw_and_save(pil: Image.Image, recos_per_inst: List[Dict[str, Any]], out_pa
         if hasattr(draw, "textbbox"):
             left, top, right, bottom = draw.textbbox((0, 0), text, font=font)
             return right - left, bottom - top
-        # Pillow <10 兜底
+        # Fallback for Pillow <10
         if hasattr(font, "getsize"):
             return font.getsize(text)
-        # 最后兜底
+        # Final fallback
         return (len(text) * 7, 14)
 
     for inst in recos_per_inst:
@@ -209,7 +209,7 @@ def draw_and_save(pil: Image.Image, recos_per_inst: List[Dict[str, Any]], out_pa
         draw.rectangle([x1, y1, x2, y2], width=2)
 
         tw, th = measure(label)
-        # 文本背景条
+        # Text background bar
         bg_top = max(0, y1 - th - 4)
         draw.rectangle([x1, bg_top, x1 + tw + 4, bg_top + th + 4], fill=(0, 0, 0))
         draw.text((x1 + 2, bg_top + 2), label, fill=(255, 255, 255), font=font)
@@ -218,25 +218,25 @@ def draw_and_save(pil: Image.Image, recos_per_inst: List[Dict[str, Any]], out_pa
     img.save(out_path)
 
 
-# ====== 主流程 ======
+# ====== main process ======
 def recommend_for_image(image_path: str, out_dir: Path):
     print(f"[INFO] Device: {DEVICE}")
-    # 1) 模型加载
+    # 1) Load models
     det = YOLO(MODEL_DET)
     clip = ClipEncoder(model_name="ViT-B-32", pretrained="openai", device=DEVICE)
 
-    # 2) 商品库向量
+    # 2) Load catalog embeddings
     catalog = load_catalog(clip, CATALOG_CSV)
     img_bank = catalog["img_embs"]
     txt_bank = catalog["txt_embs"]
 
-    # 3) 检测 + 裁剪
+    # 3) Detection + Cropping
     pil, instances = detect_instances(det, image_path)
     if not instances:
-        print("[INFO] 没检测到物体，结束。")
+        print("[INFO] No objects detected, exiting.")
         return
 
-    # 4) 每个实例做检索（图→图 + 图→文）
+    # 4) For each instance, run retrieval (image→image + image→text)
     results = []
     for inst in instances:
         emb = clip.encode_image(inst["crop"])
@@ -264,7 +264,7 @@ def recommend_for_image(image_path: str, out_dir: Path):
             "top1": recos[0]
         })
 
-    # 5) 保存可视化与 JSON
+    # 5) Save visualization and JSON
     img_out = out_dir / f"{Path(image_path).stem}_vis.jpg"
     json_out = out_dir / f"{Path(image_path).stem}_rec.json"
     draw_and_save(pil, results, img_out)
@@ -274,7 +274,7 @@ def recommend_for_image(image_path: str, out_dir: Path):
             "results": results
         }, f, ensure_ascii=False, indent=2)
 
-    # 控制台友好输出
+    # Console-friendly output
     print(f"\n[OK] visualization: {img_out}")
     print(f"[OK] JSON: {json_out}\n")
     for i, inst in enumerate(results, 1):
